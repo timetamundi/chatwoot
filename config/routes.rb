@@ -601,4 +601,9 @@ Rails.application.routes.draw do
   # ----------------------------------------------------------------------
   # Routes for testing
   resources :widget_tests, only: [:index] unless Rails.env.production?
+
+  # ----------------------------------------------------------------------
+  # SSO Routes - CRMUNDI(CHATMUNDI)
+  get '/sso/crmundi', to: 'sso#crmundi'
+  get 'sso/bootstrap', to: 'sso#bootstrap'
 end

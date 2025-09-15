@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>SSO</title>
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <!-- v param p/ bust de cache -->
+  <script src="/sso_bootstrap.js?v=<%= Time.now.to_i %>" defer></script>
+  <script>
+    console.log('[SSO] bootstrap.html.erb carregado; hash=', location.hash);
+  </script>
+</head>
+<body></body>
+</html>

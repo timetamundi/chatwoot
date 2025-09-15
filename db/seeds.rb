@@ -18,14 +18,14 @@ unless Rails.env.production?
   GlobalConfig.clear_cache
 
   account = Account.create!(
-    name: 'Acme Inc'
+    name: 'CRMundi'
   )
 
   secondary_account = Account.create!(
-    name: 'Acme Org'
+    name: 'CRMundi Org'
   )
 
-  user = User.new(name: 'John', email: 'john@acme.inc', password: 'Password1!', type: 'SuperAdmin')
+  user = User.new(name: 'Caio', email: 'caiovinicios82@gmail.com', password: 'Senha@123', type: 'SuperAdmin')
   user.skip_confirmation!
   user.save!
 
