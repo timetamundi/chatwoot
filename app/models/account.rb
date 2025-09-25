@@ -16,10 +16,12 @@
 #  support_email         :string(100)
 #  created_at            :datetime         not null
 #  updated_at            :datetime         not null
+#  external_id           :string
 #
 # Indexes
 #
-#  index_accounts_on_status  (status)
+#  index_accounts_on_external_id  (external_id) UNIQUE
+#  index_accounts_on_status       (status)
 #
 
 class Account < ApplicationRecord
