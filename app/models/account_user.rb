@@ -17,6 +17,7 @@
 #
 # Indexes
 #
+#  idx_account_users_account_user_unique            (account_id,user_id) UNIQUE
 #  index_account_users_on_account_id                (account_id)
 #  index_account_users_on_agent_capacity_policy_id  (agent_capacity_policy_id)
 #  index_account_users_on_custom_role_id            (custom_role_id)

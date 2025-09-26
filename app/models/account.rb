@@ -20,6 +20,7 @@
 #
 # Indexes
 #
+#  idx_accounts_tenant_unique     (lower((custom_attributes ->> 'tenant_id'::text))) UNIQUE WHERE (custom_attributes ? 'tenant_id'::text)
 #  index_accounts_on_external_id  (external_id) UNIQUE
 #  index_accounts_on_status       (status)
 #

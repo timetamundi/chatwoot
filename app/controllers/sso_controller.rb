@@ -1,4 +1,3 @@
-# app/controllers/sso_controller.rb
 require 'net/http'
 require 'uri'
 require 'json'
@@ -14,20 +13,23 @@ class SsoController < ApplicationController
     jwt = params[:token].to_s
     raise 'SSO token ausente' if jwt.blank?
 
-    payload = verify_with_jwks!(jwt)
+    request_tenant = resolve_tenant_from_request!
+    payload = verify_with_jwks!(jwt, request_tenant)
 
     email  = payload['email'] || payload['sub']
     raise 'email/sub ausente no token' if email.blank?
 
     name   = payload['name'].presence || email.to_s.split('@').first
     sub    = payload['sub']
-    # >>> tenant = nome do banco (ex.: MTM0001DEV), vindo do token
-    tenant = payload['account_external_id'].presence || payload['tenant'].presence
-    raise 'tenant ausente no token (account_external_id/tenant)' if tenant.blank?
+    tenant = payload['__resolved_tenant__'] # já normalizado
+    raise 'tenant ausente' if tenant.blank?
 
     user    = find_or_create_user!(email: email, name: name, external_id: sub)
     account = find_or_create_account!(tenant)
-    link_user_to_account!(user, account)
+    link_user_to_account!(
+      user, account,
+      is_technical_user: payload['is_technical_user'] || payload['role'] == 'admin'
+    )
 
     # encerra sessões antigas e autentica
     begin
@@ -41,10 +43,17 @@ class SsoController < ApplicationController
     auth = user.create_new_auth_token
     user.save!
 
-    # Caminho padrão do Chatwoot (SEM prefixo de tenant aqui)
-    requested_next = params[:next].presence || "/app/accounts/#{account.id}/dashboard"
-    requested_next = "/#{requested_next}" unless requested_next.start_with?('/')
-    next_path = requested_next  # <- usamos este nome
+    requested_next = params[:next].presence
+
+    # Se vier URL absoluta, ignora; só aceitamos caminhos locais
+    next_path =
+      if requested_next&.match?(%r{\Ahttps?://}i)
+        "/app/accounts/#{account.id}/dashboard"
+      else
+        (requested_next.presence || "/app/accounts/#{account.id}/dashboard").tap do |p|
+          p.prepend('/') unless p.start_with?('/')
+        end
+      end
 
     fragment = Rack::Utils.build_query(
       'uid' => auth['uid'],
@@ -54,11 +63,11 @@ class SsoController < ApplicationController
       'expiry' => auth['expiry'],
       'email' => email,
       'account_id' => account.id,
-      'tenant' => tenant,      # informativo
-      'next' => next_path    # <- aqui usamos next_path
+      'tenant' => tenant,
+      'next' => next_path
     )
 
-    front_base = frontend_for_tenant(tenant)  # mapeia qual Chatwoot abrir
+    front_base = frontend_for_tenant(tenant) # deve ser http://localhost:3000 em dev
     redirect_to "#{front_base}/sso/bootstrap##{fragment}"
   rescue StandardError => e
     Rails.logger.error("[SSO] #{e.class}: #{e.message}")
@@ -71,21 +80,20 @@ class SsoController < ApplicationController
 
   private
 
-  def verify_with_jwks!(jwt)
+  def verify_with_jwks!(jwt, resolved_tenant)
     iss = ENV.fetch('SSO_JWT_ISS', 'crmundi')
     aud = ENV.fetch('SSO_JWT_AUD', 'chatmundi')
 
-    # Lê cabeçalho e payload SEM verificar (só pra extrair kid e tenant)
-    unverified_payload, unverified_header = JWT.decode(jwt, nil, false)
-
-    tenant = unverified_payload['account_external_id'].presence ||
-             unverified_payload['tenant'].presence ||
-             unverified_payload['client_slug'].presence
-    raise 'tenant ausente (account_external_id/tenant/client_slug)' if tenant.blank?
-
+    # Lê header/payload sem verificar (para pegar kid)
+    _, unverified_header = JWT.decode(jwt, nil, false)
     kid = unverified_header['kid'].presence || ENV['SSO_JWT_KID'].presence
-    jwks_data = fetch_jwks!(tenant: tenant)
 
+    # 🔸 agora o tenant vem de fora (já resolvido)
+    resolved_tenant = normalize_tenant(resolved_tenant)
+    raise 'tenant ausente (request)' if resolved_tenant.blank?
+
+    # Busca JWKS do tenant resolvido
+    jwks_data = fetch_jwks!(tenant: resolved_tenant)
     keys = Array(jwks_data['keys'])
     raise "JWKS inválido: sem 'keys'. Body=#{jwks_data.inspect[0, 200]}" if keys.empty?
 
@@ -104,8 +112,23 @@ class SsoController < ApplicationController
       algorithm: 'RS256',
       iss: iss, verify_iss: true,
       aud: aud, verify_aud: true,
-      leeway: 30
+      verify_iat: true, verify_exp: true,
+      leeway: 60
     )
+
+    # Coerência extra: se o token trouxer tenant, precisa bater
+    token_tenant =
+      payload['account_external_id'].presence ||
+      payload['tenant'].presence ||
+      payload['client_slug'].presence
+
+    if token_tenant.present? && normalize_tenant(token_tenant) != resolved_tenant
+      raise "tenant divergente (token=#{token_tenant} req=#{resolved_tenant})"
+    end
+
+    # padroniza para o restante do fluxo
+    payload['tenant'] = resolved_tenant
+    payload['__resolved_tenant__'] = resolved_tenant
     payload
   end
 
@@ -141,16 +164,56 @@ class SsoController < ApplicationController
     end
   end
 
-  def find_or_create_account!(ext)
-    if Account.column_names.include?('external_id')
-      Account.find_by(external_id: ext) || Account.create!(name: ext, external_id: ext, locale: 'pt_BR')
-    else
-      Account.find_by(name: ext) || Account.create!(name: ext, locale: 'pt_BR')
+  def find_or_create_account!(raw_tenant)
+    tenant = normalize_tenant(raw_tenant)
+
+    # tenta achar
+    acc = Account.where("lower(custom_attributes->>'tenant_id') = ?", tenant).first
+    return acc if acc
+
+    # cria de forma idempotente
+    Account.transaction do
+      acc = Account.where("lower(custom_attributes->>'tenant_id') = ?", tenant).first
+      return acc if acc
+
+      attrs = {
+        name: tenant.upcase,
+        custom_attributes: { 'tenant_id' => tenant },
+        locale: 'pt_BR'
+      }
+
+      # ✅ Só define :limits se a coluna existir e o valor for Hash
+      if Account.column_names.include?('limits')
+        default_limits =
+          if Account.respond_to?(:DEFAULT_LIMITS) && Account::DEFAULT_LIMITS.is_a?(Hash)
+            Account::DEFAULT_LIMITS
+          else
+            {} # fallback seguro
+          end
+        attrs[:limits] = default_limits
+      end
+
+      acc = Account.create!(attrs)
+
+      # tags (se tiver acts-as-taggable)
+      if acc.respond_to?(:tag_list)
+        %w[whitelabel crmundi].each { |tag| acc.tag_list.add(tag) }
+        acc.save!
+      else
+        acc.update!(custom_attributes: acc.custom_attributes.merge('tags' => %w[whitelabel crmundi]))
+      end
+
+      acc
     end
+  rescue ActiveRecord::RecordNotUnique
+    Account.where("lower(custom_attributes->>'tenant_id') = ?", tenant).first
   end
 
-  def link_user_to_account!(user, account)
-    AccountUser.find_or_create_by!(account: account, user: user) { |au| au.role = :administrator }
+  def link_user_to_account!(user, account, is_technical_user: false)
+    au = AccountUser.find_or_create_by!(account: account, user: user)
+    role = is_technical_user ? :administrator : :agent
+    au.update!(role: role) if au.role.to_s != role.to_s
+    au
   end
 
   def frontend_for_tenant(tenant)
@@ -170,5 +233,36 @@ class SsoController < ApplicationController
       end
     end
     ENV.fetch('FRONTEND_URL') # fallback global (um Chatwoot só)
+  end
+
+  def normalize_tenant(raw)
+    raw.to_s.strip.downcase
+  end
+
+  def resolve_tenant_from_request!
+    t = request.headers['X-Tenant-Id'].presence ||
+        params[:tenant].presence ||
+        first_segment_from(params[:next]) ||
+        begin
+          first_segment_from(URI(request.referer).path)
+        rescue StandardError
+          nil
+        end ||
+        begin
+          first_segment_from(URI(request.headers['Origin']).path)
+        rescue StandardError
+          nil
+        end
+
+    t = normalize_tenant(t)
+    raise 'tenant ausente no request' if t.blank?
+
+    t
+  end
+
+  def first_segment_from(path)
+    return nil if path.blank?
+
+    path.to_s.split('/').reject(&:blank?).first
   end
 end
