@@ -26,10 +26,10 @@ class SsoController < ApplicationController
 
     user    = find_or_create_user!(email: email, name: name, external_id: sub)
     account = find_or_create_account!(tenant)
-    link_user_to_account!(
-      user, account,
-      is_technical_user: payload['is_technical_user'] || payload['role'] == 'admin'
-    )
+    cw_role = (payload['cw_role'].presence || infer_role_from_payload(payload)).to_s
+    cw_role = %w[administrator agent].include?(cw_role) ? cw_role : 'agent'
+
+    link_user_to_account_with_role!(user, account, cw_role)
 
     # encerra sessões antigas e autentica
     begin
@@ -88,7 +88,7 @@ class SsoController < ApplicationController
     _, unverified_header = JWT.decode(jwt, nil, false)
     kid = unverified_header['kid'].presence || ENV['SSO_JWT_KID'].presence
 
-    # 🔸 agora o tenant vem de fora (já resolvido)
+    # tenant vem do request
     resolved_tenant = normalize_tenant(resolved_tenant)
     raise 'tenant ausente (request)' if resolved_tenant.blank?
 
@@ -116,11 +116,9 @@ class SsoController < ApplicationController
       leeway: 60
     )
 
-    # Coerência extra: se o token trouxer tenant, precisa bater
+    # comparar APENAS com 'tenant' vindo no token (se vier)
     token_tenant =
-      payload['account_external_id'].presence ||
-      payload['tenant'].presence ||
-      payload['client_slug'].presence
+      payload['tenant'].presence
 
     if token_tenant.present? && normalize_tenant(token_tenant) != resolved_tenant
       raise "tenant divergente (token=#{token_tenant} req=#{resolved_tenant})"
@@ -177,12 +175,11 @@ class SsoController < ApplicationController
       return acc if acc
 
       attrs = {
-        name: tenant.upcase,
+        name: tenant,
         custom_attributes: { 'tenant_id' => tenant },
         locale: 'pt_BR'
       }
 
-      # ✅ Só define :limits se a coluna existir e o valor for Hash
       if Account.column_names.include?('limits')
         default_limits =
           if Account.respond_to?(:DEFAULT_LIMITS) && Account::DEFAULT_LIMITS.is_a?(Hash)
@@ -206,13 +203,22 @@ class SsoController < ApplicationController
       acc
     end
   rescue ActiveRecord::RecordNotUnique
-    Account.where("lower(custom_attributes->>'tenant_id') = ?", tenant).first
+    Account.where("lower(custom_attributes->>'tenant_id') = lower(?)", tenant).first
   end
 
-  def link_user_to_account!(user, account, is_technical_user: false)
+  def infer_role_from_payload(payload)
+    # fallback se não tiver cw_role (compatibilidade com tokens antigos)
+    role = payload['role'].to_s.downcase
+    return 'administrator' if role.in?(%w[admin administrator owner super_admin])
+
+    'agent'
+  end
+
+  def link_user_to_account_with_role!(user, account, cw_role)
     au = AccountUser.find_or_create_by!(account: account, user: user)
-    role = is_technical_user ? :administrator : :agent
-    au.update!(role: role) if au.role.to_s != role.to_s
+    return au if au.role.to_s == 'administrator' && cw_role != 'administrator'
+
+    au.update!(role: cw_role) if au.role.to_s != cw_role
     au
   end
 
@@ -236,7 +242,7 @@ class SsoController < ApplicationController
   end
 
   def normalize_tenant(raw)
-    raw.to_s.strip.downcase
+    raw.to_s.strip
   end
 
   def resolve_tenant_from_request!
