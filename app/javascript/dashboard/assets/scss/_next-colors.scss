@@ -36,12 +36,11 @@
     --blue-5: 201 226 255;
     --blue-6: 181 213 255;
     --blue-7: 155 195 252;
-    --blue-8: 117 171 247;
-    --blue-9: 39 129 246;
-    --blue-10: 16 115 233;
-    --blue-11: 8 109 224;
-    --blue-12: 11 50 101;
-
+    --blue-8: 74 222 128;    // #4ade80 (verde médio)
+    --blue-9: 22 163 74;     // #16a34a (verde principal)
+    --blue-10: 21 128 61;    // #15803d (verde escuro) 
+    --blue-11: 5 122 85;     // #047857 (verde ainda mais escuro) 
+    --blue-12: 12 41 20;     //fundo bem escuro p/ contraste 
     --ruby-1: 255 252 253;
     --ruby-2: 255 247 248;
     --ruby-3: 254 234 237;
@@ -95,7 +94,7 @@
     --gray-12: 32 32 32;
 
     --background-color: 253 253 253;
-    --text-blue: 8 109 224;
+    --text-blue: 22 163 74;  // alterado para verde
     --border-container: 236 236 236;
     --border-strong: 235 235 235;
     --border-weak: 234 234 234;
@@ -104,7 +103,7 @@
     --solid-3: 255 255 255;
     --solid-active: 255 255 255;
     --solid-amber: 252 232 193;
-    --solid-blue: 218 236 255;
+    --solid-blue: 220 252 231;  // alterado para verde
     --solid-iris: 230 231 255;
 
     --alpha-1: 67, 67, 67, 0.06;
@@ -112,8 +111,9 @@
     --alpha-3: 255, 255, 255, 0.96;
     --black-alpha-1: 0, 0, 0, 0.12;
     --black-alpha-2: 0, 0, 0, 0.04;
-    --border-blue: 39, 129, 246, 0.5;
+    --border-blue: 34, 197, 94, 0.5;  // alterado para verde
     --white-alpha: 255, 255, 255, 0.8;
+    --n-brand: 22 163 74;
   }
 
   .dark {
@@ -151,11 +151,11 @@
     --blue-5: 18 61 117;
     --blue-6: 29 84 134;
     --blue-7: 40 89 156;
-    --blue-8: 48 106 186;
-    --blue-9: 39 129 246;
-    --blue-10: 21 116 231;
-    --blue-11: 126 182 255;
-    --blue-12: 205 227 255;
+    --blue-8: 34 197 94;     // #22c55e 
+    --blue-9: 22 163 74;     // #16a34a 
+    --blue-10: 20 83 45;     // #14532d 
+    --blue-11: 134 239 172;  // #86efac 
+    --blue-12: 236 253 245;  // #ecfdf5 
 
     --ruby-1: 25 17 19;
     --ruby-2: 30 21 23;
@@ -217,18 +217,30 @@
     --solid-3: 44 45 54;
     --solid-active: 53 57 66;
     --solid-amber: 42 37 30;
-    --solid-blue: 16 49 91;
+    --solid-blue: 22 63 39;  // alterado para verde
     --solid-iris: 38 42 101;
-    --text-blue: 126 182 255;
+    --text-blue: 134 239 172;  // alterado para verde
 
     --alpha-1: 36, 36, 36, 0.8;
     --alpha-2: 139, 147, 182, 0.15;
     --alpha-3: 36, 38, 45, 0.9;
     --black-alpha-1: 0, 0, 0, 0.3;
     --black-alpha-2: 0, 0, 0, 0.2;
-    --border-blue: 39, 129, 246, 0.5;
+    --border-blue: 34, 197, 94, 0.5; // alterado para verde
     --border-container: 236, 236, 236, 0;
     --white-alpha: 255, 255, 255, 0.1;
+    --n-brand: 34 197 94; 
   }
 }
 // NEXT COLORS END
+.bg-n-brand,
+.bg-n-blue-9 {
+  background-color: rgb(22 163 74) !important; // verde brand
+  border-color: rgb(22 163 74) !important;
+  color: rgb(var(--text-on-brand)) !important;
+}
+
+.bg-n-brand:hover,
+.bg-n-blue-9:hover {
+  filter: brightness(1.05);
+}
