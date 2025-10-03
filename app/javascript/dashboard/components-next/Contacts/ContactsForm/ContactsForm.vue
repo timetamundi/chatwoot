@@ -34,9 +34,9 @@ const FORM_CONFIG = {
   LAST_NAME: { field: 'lastName' },
   EMAIL_ADDRESS: { field: 'email' },
   PHONE_NUMBER: { field: 'phoneNumber' },
-  CITY: { field: 'additionalAttributes.city' },
+  // CITY: { field: 'additionalAttributes.city' },
   COUNTRY: { field: 'additionalAttributes.countryCode' },
-  BIO: { field: 'additionalAttributes.description' },
+  // BIO: { field: 'additionalAttributes.description' },
   COMPANY_NAME: { field: 'additionalAttributes.companyName' },
 };
 
@@ -285,7 +285,7 @@ defineExpose({
         </template>
       </div>
     </div>
-    <div class="flex flex-col items-start gap-2">
+    <div v-if="false" class="flex flex-col items-start gap-2">
       <span class="py-1 text-sm font-medium text-n-slate-12">
         {{ t('CONTACTS_LAYOUT.CARD.SOCIAL_MEDIA.TITLE') }}
       </span>

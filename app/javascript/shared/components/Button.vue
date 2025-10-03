@@ -7,7 +7,7 @@ export default {
     },
     type: {
       type: String,
-      default: 'blue',
+      default: 'brand',
     },
     bgColor: {
       type: String,
@@ -30,7 +30,7 @@ export default {
         className = 'flex mx-auto mt-4 text-xs leading-3 w-auto text-n-gray-12';
       }
 
-      if (this.type === 'blue' && !Object.keys(this.buttonStyles).length) {
+      if (this.type === 'brand' && !Object.keys(this.buttonStyles).length) {
         className = `${className} bg-n-brand hover:brightness-110`;
       }
       if (this.block) {
