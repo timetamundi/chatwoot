@@ -22,10 +22,9 @@ class SsoController < ApplicationController
     name   = payload['name'].presence || email.to_s.split('@').first
     sub    = payload['sub']
     tenant = payload['__resolved_tenant__'] # já normalizado
-    raise 'tenant ausente' if tenant.blank?
-
-    user    = find_or_create_user!(email: email, name: name, external_id: sub)
+    raise 'tenant ausente' if tenant.blank?    user    = find_or_create_user!(email: email, name: name, external_id: sub)
     account = find_or_create_account!(tenant)
+    upsert_crmundi_tenant_mapping!(account, tenant)
     cw_role = (payload['cw_role'].presence || infer_role_from_payload(payload)).to_s
     cw_role = %w[administrator agent].include?(cw_role) ? cw_role : 'agent'
 
@@ -240,7 +239,23 @@ class SsoController < ApplicationController
     end
     ENV.fetch('FRONTEND_URL') # fallback global (um Chatwoot só)
   end
+  # Salva o Tenant.name do CRMundi em account.custom_attributes['crmundi_tenant_name'].
+  # Chamado a cada SSO para manter o vínculo atualizado sem necessidade de ENV.
+  # Nunca propaga erro — uma falha aqui jamais deve interromper o login.
+  def upsert_crmundi_tenant_mapping!(account, tenant)
+    tenant_name = tenant.to_s.strip
+    return if tenant_name.blank?
 
+    attrs = (account.custom_attributes || {}).dup
+    # só faz UPDATE se o valor mudou (evita dirty-write desnecessário)
+    return if attrs['crmundi_tenant_name'].to_s == tenant_name
+
+    attrs['crmundi_tenant_name'] = tenant_name
+    account.update!(custom_attributes: attrs)
+    Rails.logger.info("[SSO] CRMundi tenant vinculado na account #{account.id}: #{tenant_name}")
+  rescue StandardError => e
+    Rails.logger.error("[SSO] Falha ao vincular CRMundi tenant na account #{account&.id}: #{e.class} - #{e.message}")
+  end
   def normalize_tenant(raw)
     raw.to_s.strip
   end
