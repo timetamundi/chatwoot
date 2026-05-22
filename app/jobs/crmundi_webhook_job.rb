@@ -52,13 +52,19 @@ class CrmundiWebhookJob < ApplicationJob
     headers = {
       content_type: :json,
       accept: :json,
-      'X-Tenant-Id' => conversation.account_id.to_s
+      'X-Tenant-Id' => crmundi_tenant_id(conversation)
     }
 
     token = ENV.fetch('CRMUNDI_WEBHOOK_TOKEN', '').strip
     headers['Authorization'] = "Bearer #{token}" if token.present?
 
     headers
+  end
+
+  # Usa o slug/id do tenant no CRMundi (CRMUNDI_TENANT_ID).
+  # Fallback para account_id numerico do Chatwoot se nao configurado.
+  def crmundi_tenant_id(conversation)
+    ENV.fetch('CRMUNDI_TENANT_ID', '').strip.presence || conversation.account_id.to_s
   end
 
   def build_payload(conversation)
@@ -85,9 +91,10 @@ class CrmundiWebhookJob < ApplicationJob
     message.incoming? || message.outgoing?
   end
 
+  # Padrao LLM: "user" para cliente, "assistant" para agente.
   def serialize_message(message)
     {
-      role: message.incoming? ? 'client' : 'agent',
+      role: message.incoming? ? 'user' : 'assistant',
       content: message.content,
       timestamp: message.created_at.iso8601
     }
