@@ -7,11 +7,11 @@ class AsyncDispatcher < BaseDispatcher
     event_object = Events::Base.new(event_name, timestamp, data)
     publish(event_object.method_name, event_object)
   end
-
   def listeners
     [
       AutomationRuleListener.instance,
       CampaignListener.instance,
+      CrmundiWebhookListener.instance,
       CsatSurveyListener.instance,
       HookListener.instance,
       InstallationWebhookListener.instance,
