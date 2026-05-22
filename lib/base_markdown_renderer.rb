@@ -1,4 +1,6 @@
-class BaseMarkdownRenderer < CommonMarker::HtmlRenderer
+require 'commonmarker'
+
+class BaseMarkdownRenderer < Commonmarker::Renderer
   def image(node)
     src, title = extract_img_attributes(node)
     height = extract_image_height(src)

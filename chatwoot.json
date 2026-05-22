@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "accountId": "997",
+  "token": "NOVO_TOKEN_ADMIN",
+  "url": "https://chat.crmundi.com.br",
+  "signMsg": true,
+  "reopenConversation": true,
+  "conversationPending": true,
+  "importContacts": false,
+  "importMessages": false,
+  "nameInbox": "crmundi-FFTURISMO"
+}

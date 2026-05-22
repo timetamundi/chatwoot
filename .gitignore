@@ -96,3 +96,5 @@ yarn-debug.log*
 .cursor
 CLAUDE.local.md
 pgvector/
+node_modules/
+vendor/

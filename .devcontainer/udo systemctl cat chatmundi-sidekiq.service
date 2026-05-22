@@ -1,0 +1,31 @@
+[0;1;34m# ]8;;file://CRMundi/etc/systemd/system/chatmundi.service/etc/systemd/system/chatmundi.service]8;;[0m
+[0;1;36m[Unit][0m
+Description=ChatMundi Rails (Puma)
+After=network.target
+[0;1;38;5;245m[0m
+[0;1;36m[Service][0m
+Type=simple
+User=root
+WorkingDirectory=/root/crmundi-agents/chatmundi
+[0;1;38;5;245m[0m
+[0;1;38;5;245m# 🔧 rbenv[0m
+Environment=RBENV_ROOT=/root/.rbenv
+Environment=PATH=/root/.rbenv/shims:/root/.rbenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+[0;1;38;5;245m[0m
+[0;1;38;5;245m# 🔧 Rails[0m
+Environment=RAILS_ENV=production
+Environment=PORT=3000
+[0;1;38;5;245m[0m
+[0;1;38;5;245m# 👉 use o bundle do rbenv[0m
+ExecStart=/root/.rbenv/shims/bundle exec puma -C config/puma.rb -p 3000 -e production
+[0;1;38;5;245m[0m
+Restart=always
+RestartSec=5
+[0;1;38;5;245m[0m
+[0;1;38;5;245m# logs[0m
+StandardOutput=append:/root/crmundi-agents/chatmundi/log/puma.log
+StandardError=append:/root/crmundi-agents/chatmundi/log/puma-error.log
+[0;1;38;5;245m[0m
+[0;1;36m[Install][0m
+WantedBy=multi-user.target
+[0;1;38;5;245m[0m
