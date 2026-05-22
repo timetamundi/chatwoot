@@ -1,114 +1,107 @@
-# frozen_string_literal: true
+﻿# frozen_string_literal: true
 
-# Job responsável por enviar o payload de conversa resolvida para o CRMundi.
-# Executa de forma assíncrona para não bloquear a resolução da conversa.
+# Job responsavel por enviar o payload de conversa resolvida para o CRMundi.
+# Executado de forma assincrona pelo Sidekiq - nunca bloqueia a resolucao da conversa.
 class CrmundiWebhookJob < ApplicationJob
-  queue_as :low
+  queue_as :default
 
-  # Tempo máximo de espera antes de desistir
-  sidekiq_options retry: 3, dead: false
+  # sidekiq_options so existe quando o adaptador for Sidekiq
+  sidekiq_options retry: 3 if respond_to?(:sidekiq_options)
 
   def perform(conversation_id)
-    return unless crmundi_enabled?
+    unless crmundi_enabled?
+      log_info('Webhook desabilitado (CRMUNDI_WEBHOOK_ENABLED != true)')
+      return
+    end
+
+    url = ENV.fetch('CRMUNDI_WEBHOOK_URL', '').strip
+    if url.blank?
+      log_info('URL nao configurada (CRMUNDI_WEBHOOK_URL vazia)')
+      return
+    end
 
     conversation = Conversation.find_by(id: conversation_id)
     unless conversation
-      Rails.logger.warn("[CRMundi] Conversa #{conversation_id} não encontrada, ignorando.")
+      log_info("Conversa #{conversation_id} nao encontrada, ignorando.")
       return
     end
 
     payload = build_payload(conversation)
-    send_to_crmundi(payload, conversation)
+    headers = build_headers(conversation)
+
+    response = RestClient.post(url, payload.to_json, headers)
+
+    Rails.logger.info(
+      "[CRMundi] Webhook enviado com sucesso. Conversa #{conversation.id}, status HTTP #{response.code}"
+    )
+  rescue StandardError => e
+    Rails.logger.error(
+      "[CRMundi] Falha ao enviar webhook. Conversa #{conversation_id}. " \
+      "Erro: #{e.class} - #{e.message}"
+    )
+    raise e # permite que o Sidekiq faca retry automatico
   end
 
   private
 
   def crmundi_enabled?
-    ENV.fetch('CRMUNDI_WEBHOOK_ENABLED', 'false').to_s.downcase == 'true' &&
-      ENV['CRMUNDI_WEBHOOK_URL'].present?
+    ENV.fetch('CRMUNDI_WEBHOOK_ENABLED', 'false').strip == 'true'
+  end
+
+  def build_headers(conversation)
+    headers = {
+      content_type: :json,
+      accept: :json,
+      'X-Tenant-Id' => conversation.account_id.to_s
+    }
+
+    token = ENV.fetch('CRMUNDI_WEBHOOK_TOKEN', '').strip
+    headers['Authorization'] = "Bearer #{token}" if token.present?
+
+    headers
   end
 
   def build_payload(conversation)
-    contact       = conversation.contact
-    contact_inbox = conversation.contact_inbox
-
-    # source_id para WhatsApp/Evolution é algo como "5511999999999@s.whatsapp.net"
-    whatsapp_source_id = contact_inbox&.source_id.to_s
-
-    # Tenta extrair número limpo do source_id ou do campo phone_number do contato
-    phone = extract_phone(contact, whatsapp_source_id)
-
-    messages = build_conversation_history(conversation)
-    last_message = messages.last&.dig(:content).to_s
+    messages = conversation.messages
+                           .order(:created_at)
+                           .select { |msg| valid_message?(msg) }
+                           .map { |msg| serialize_message(msg) }
 
     {
-      phone: phone,
-      contact_id: whatsapp_source_id,
+      phone: conversation.contact&.phone_number,
+      contact_id: contact_identifier(conversation),
       conversation_id: conversation.id.to_s,
-      contact_name: contact&.name.to_s,
-      last_message: last_message,
+      contact_name: conversation.contact&.name,
+      last_message: messages.last&.dig(:content),
       conversation: messages
     }
   end
 
-  def extract_phone(contact, source_id)
-    # Prefere o phone_number cadastrado no contato
-    return contact.phone_number if contact&.phone_number.present?
+  # Aceita apenas mensagens humanas (cliente ou agente), com texto, nao-privadas.
+  def valid_message?(message)
+    return false if message.try(:private?)
+    return false if message.content.blank?
 
-    # Tenta extrair do source_id WhatsApp: "5511999999999@s.whatsapp.net" → "+5511999999999"
-    if source_id.include?('@')
-      number = source_id.split('@').first
-      return "+#{number}" if number.match?(/\A\d+\z/)
-    end
-
-    source_id
+    message.incoming? || message.outgoing?
   end
 
-  def build_conversation_history(conversation)
-    # Busca todas as mensagens de chat (exclui atividade/sistema/privadas)
-    conversation.messages
-                .chat
-                .where(private: false)
-                .order(created_at: :asc)
-                .map do |msg|
-                  role = msg.incoming? ? 'client' : 'agent'
-                  {
-                    role: role,
-                    content: msg.content.to_s,
-                    timestamp: msg.created_at.iso8601
-                  }
-                end
-  end
-
-  def send_to_crmundi(payload, conversation)
-    url   = ENV.fetch('CRMUNDI_WEBHOOK_URL', nil)
-    token = ENV.fetch('CRMUNDI_WEBHOOK_TOKEN', nil)
-
-    headers = {
-      'Content-Type'  => 'application/json',
-      'X-Tenant-Id'   => conversation.account_id.to_s
+  def serialize_message(message)
+    {
+      role: message.incoming? ? 'client' : 'agent',
+      content: message.content,
+      timestamp: message.created_at.iso8601
     }
-    headers['Authorization'] = "Bearer #{token}" if token.present?
+  end
 
-    response = RestClient::Request.execute(
-      method: :post,
-      url: url,
-      payload: payload.to_json,
-      headers: headers,
-      timeout: 10,
-      open_timeout: 5
-    )
+  # Retorna o identificador do contato no canal.
+  # Para WhatsApp/Evolution: "5511999999999@s.whatsapp.net"
+  def contact_identifier(conversation)
+    conversation.contact&.identifier.presence ||
+      conversation.contact_inbox&.source_id.presence ||
+      conversation.contact&.phone_number
+  end
 
-    Rails.logger.info(
-      "[CRMundi] Webhook enviado com sucesso. Conversa #{conversation.id}, status HTTP #{response.code}"
-    )
-  rescue RestClient::ExceptionWithResponse => e
-    Rails.logger.error(
-      "[CRMundi] Falha no webhook. Conversa #{conversation.id}, " \
-      "status HTTP #{e.response&.code}, body: #{e.response&.body.to_s.truncate(300)}"
-    )
-  rescue StandardError => e
-    # Loga o erro mas NÃO propaga — a resolução da conversa já ocorreu
-    Rails.logger.error("[CRMundi] Erro ao enviar webhook para conversa #{conversation.id}: #{e.message}")
+  def log_info(message)
+    Rails.logger.info("[CRMundi] #{message}")
   end
 end
