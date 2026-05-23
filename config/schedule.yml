@@ -53,3 +53,11 @@ bulk_auto_assignment_job:
   cron: '*/15 * * * *'
   class: 'Inboxes::BulkAutoAssignmentJob'
   queue: scheduled_jobs
+
+# executed every 5 minutes
+# sends CRMundi webhook for WhatsApp/Evolution conversations inactive >= CRMUNDI_INACTIVITY_MINUTES
+# only runs when CRMUNDI_INACTIVITY_WEBHOOK_ENABLED=true
+crmundi_inactive_conversations_scanner_job:
+  cron: '*/5 * * * *'
+  class: 'CrmundiInactiveConversationsScannerJob'
+  queue: scheduled_jobs

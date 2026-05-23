@@ -1,6 +1,6 @@
 ﻿# frozen_string_literal: true
 
-# Job responsavel por enviar o payload de conversa resolvida para o CRMundi.
+# Job responsavel por enviar o payload de conversa resolvida/inativa para o CRMundi.
 # Executado de forma assincrona pelo Sidekiq — nunca bloqueia a resolucao da conversa.
 #
 # O X-Tenant-Id e resolvido EXCLUSIVAMENTE via account.custom_attributes, populado
@@ -11,7 +11,8 @@ class CrmundiWebhookJob < ApplicationJob
   # sidekiq_options so existe quando o adaptador for Sidekiq
   sidekiq_options retry: 3 if respond_to?(:sidekiq_options)
 
-  def perform(conversation_id)
+  # reason: "resolved" (botao Resolver) ou "inactivity_Nmin" (scanner de inatividade)
+  def perform(conversation_id, reason = 'resolved')
     unless crmundi_enabled?
       log_info('Webhook desabilitado (CRMUNDI_WEBHOOK_ENABLED != true)')
       return
@@ -41,6 +42,9 @@ class CrmundiWebhookJob < ApplicationJob
     Rails.logger.info(
       "[CRMundi] Webhook enviado com sucesso. Conversa #{conversation.id}, status HTTP #{response.code}"
     )
+
+    # Marca a conversa como enviada APENAS apos sucesso HTTP (evita duplicidade futura)
+    mark_conversation_as_sent!(conversation, reason)
   rescue StandardError => e
     Rails.logger.error(
       "[CRMundi] Falha ao enviar webhook. Conversa #{conversation_id}. " \
@@ -67,35 +71,14 @@ class CrmundiWebhookJob < ApplicationJob
     headers
   end
 
-  # Resolve o X-Tenant-Id via custom_attributes da Account — preenchido automaticamente pelo SSO.
-  #
-  # Prioridade:
-  #   1. account.custom_attributes['crmundi_tenant_name']  => salvo pelo SSO (padrao novo)
-  #   2. account.custom_attributes['tenant_id']            => compatibilidade legada
-  #   3. nil => webhook NAO e enviado (perform retorna antes de chamar RestClient)
-  #
-  # Nao usa ENV. Nao usa account_id numerico. Sem CRMUNDI_TENANT_MAP/CRMUNDI_TENANT_ID.
+  # Delega ao service compartilhado — sem duplicar logica de tenant.
   def crmundi_tenant_id(conversation)
-    account    = conversation.account
     account_id = conversation.account_id.to_s
-    attrs      = account&.custom_attributes || {}
+    tenant = Crmundi::ConversationEligibility.tenant_for(conversation)
 
-    tenant_from_sso = attrs['crmundi_tenant_name'].to_s.strip
-    if tenant_from_sso.present?
-      Rails.logger.info(
-        "[CRMundi] Tenant resolvido via account.custom_attributes['crmundi_tenant_name']: " \
-        "account_id=#{account_id} tenant=#{tenant_from_sso}"
-      )
-      return tenant_from_sso
-    end
-
-    legacy_tenant = attrs['tenant_id'].to_s.strip
-    if legacy_tenant.present?
-      Rails.logger.info(
-        "[CRMundi] Tenant resolvido via account.custom_attributes['tenant_id'] legado: " \
-        "account_id=#{account_id} tenant=#{legacy_tenant}"
-      )
-      return legacy_tenant
+    if tenant.present?
+      Rails.logger.info("[CRMundi] Tenant resolvido para account_id=#{account_id}: #{tenant}")
+      return tenant
     end
 
     Rails.logger.error(
@@ -103,6 +86,23 @@ class CrmundiWebhookJob < ApplicationJob
       "em custom_attributes. O usuario precisa acessar via SSO CRMundi primeiro."
     )
     nil
+  end
+
+  # Salva metadata de envio na conversa para garantir idempotencia.
+  # So chamado apos POST HTTP bem-sucedido.
+  def mark_conversation_as_sent!(conversation, reason)
+    attrs = (conversation.custom_attributes || {}).dup
+    attrs['crmundi_webhook_sent_at'] = Time.current.iso8601
+    attrs['crmundi_webhook_reason']  = reason
+    conversation.update!(custom_attributes: attrs)
+    Rails.logger.info(
+      "[CRMundi] Conversa #{conversation.id} marcada como enviada ao CRMundi. reason=#{reason}"
+    )
+  rescue StandardError => e
+    # Nao propaga — o webhook ja foi enviado com sucesso; falha na marcacao e secundaria
+    Rails.logger.error(
+      "[CRMundi] Falha ao marcar conversa #{conversation.id} como enviada: #{e.class} - #{e.message}"
+    )
   end
 
   def build_payload(conversation)
