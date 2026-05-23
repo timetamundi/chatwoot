@@ -22,7 +22,9 @@ class SsoController < ApplicationController
     name   = payload['name'].presence || email.to_s.split('@').first
     sub    = payload['sub']
     tenant = payload['__resolved_tenant__'] # já normalizado
-    raise 'tenant ausente' if tenant.blank?    user    = find_or_create_user!(email: email, name: name, external_id: sub)
+    raise 'tenant ausente' if tenant.blank?
+
+    user    = find_or_create_user!(email: email, name: name, external_id: sub)
     account = find_or_create_account!(tenant)
     upsert_crmundi_tenant_mapping!(account, tenant)
     cw_role = (payload['cw_role'].presence || infer_role_from_payload(payload)).to_s
