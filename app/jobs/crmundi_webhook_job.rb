@@ -111,31 +111,85 @@ class CrmundiWebhookJob < ApplicationJob
                            .select { |msg| valid_message?(msg) }
                            .map { |msg| serialize_message(msg) }
 
+    last_msg = messages.last
+    last_message_text = last_message_label(last_msg)
+
     {
       phone: conversation.contact&.phone_number,
       contact_id: contact_identifier(conversation),
       conversation_id: conversation.id.to_s,
       contact_name: conversation.contact&.name,
-      last_message: messages.last&.dig(:content),
+      last_message: last_message_text,
       conversation: messages
     }
   end
 
-  # Aceita apenas mensagens humanas (cliente ou agente), com texto, nao-privadas.
+  # Retorna o texto a exibir como last_message no payload CRMundi.
+  def last_message_label(serialized_msg)
+    return nil if serialized_msg.nil?
+
+    return serialized_msg[:content] if serialized_msg[:content].present?
+
+    # Mensagem so com anexos — escolhe label por tipo
+    attachments = serialized_msg[:attachments] || []
+    if attachments.any? { |a| a[:file_type] == 'image' }
+      '[imagem enviada]'
+    elsif attachments.any?
+      '[arquivo enviado]'
+    end
+  end
+
+  # Aceita mensagens humanas (cliente ou agente), nao-privadas, com texto OU anexos.
+  # Exclui mensagens de atividade (message_type == "activity").
   def valid_message?(message)
     return false if message.try(:private?)
-    return false if message.content.blank?
+    return false if message.try(:activity?)
+
+    has_content    = message.content.present?
+    has_attachment = message.attachments.any?
+
+    return false unless has_content || has_attachment
 
     message.incoming? || message.outgoing?
   end
 
   # Padrao LLM: "user" para cliente, "assistant" para agente.
   def serialize_message(message)
-    {
-      role: message.incoming? ? 'user' : 'assistant',
-      content: message.content,
+    attachments = serialize_attachments(message)
+
+    serialized = {
+      role:      message.incoming? ? 'user' : 'assistant',
+      content:   message.content.presence,
       timestamp: message.created_at.iso8601
     }
+
+    if attachments.any?
+      serialized[:message_type] = 'attachment'
+      serialized[:attachments]  = attachments
+      Rails.logger.info(
+        "[CRMundi] Mensagem #{message.id} com #{attachments.size} anexo(s): " \
+        "#{attachments.map { |a| a[:file_name] }.join(', ')}"
+      )
+    end
+
+    serialized
+  end
+
+  # Serializa os anexos de uma mensagem.
+  def serialize_attachments(message)
+    message.attachments.map do |attachment|
+      file_type    = attachment.file_type.to_s
+      file_name    = attachment.file.attached? ? attachment.file.filename.to_s : nil
+      content_type = attachment.file.attached? ? attachment.file.blob&.content_type : nil
+      download_url = attachment.download_url.presence || attachment.external_url.presence
+
+      {
+        file_type:    file_type,
+        file_name:    file_name,
+        content_type: content_type,
+        download_url: download_url
+      }
+    end
   end
 
   # Retorna o identificador do contato no canal.
