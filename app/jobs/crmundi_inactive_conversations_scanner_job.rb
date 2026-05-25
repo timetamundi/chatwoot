@@ -99,10 +99,15 @@ class CrmundiInactiveConversationsScannerJob < ApplicationJob
   def already_sent?(conversation)
     conversation.custom_attributes&.dig('crmundi_webhook_sent_at').present?
   end
-
   def public_messages_for(conversation)
     conversation.messages.select do |msg|
-      !msg.try(:private?) && msg.content.present? && (msg.incoming? || msg.outgoing?)
+      next false if msg.try(:private?)
+      next false if msg.try(:activity?)
+
+      has_content    = msg.content.present?
+      has_attachment = msg.attachments.any?
+
+      (has_content || has_attachment) && (msg.incoming? || msg.outgoing?)
     end
   end
 
