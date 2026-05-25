@@ -12,15 +12,22 @@ class CrmundiWebhookListener < BaseListener
     conversation = event.data[:conversation]
     return unless conversation
 
+    Rails.logger.info(
+      "[CRMundi] Listener recebeu conversation_resolved: " \
+      "conversation_id=#{conversation.id} account_id=#{conversation.account_id} " \
+      "display_id=#{conversation.display_id} channel=#{conversation.inbox&.channel_type} " \
+      "inbox=#{conversation.inbox&.name}"
+    )
+
     unless Crmundi::ConversationEligibility.whatsapp_or_evolution?(conversation)
-      Rails.logger.info("[CRMundi] Conversa #{conversation.id} ignorada: canal nao WhatsApp/Evolution")
+      Rails.logger.info("[CRMundi] Conversa #{conversation.id} ignorada: canal nao elegivel")
       return
     end
 
     # TODO: filtrar por labels quando disponivel.
     # Exemplo: return if (conversation.labels & %w[spam reembolso reclamacao pos-venda]).any?
 
-    Rails.logger.info("[CRMundi] Conversa #{conversation.id} resolvida - enfileirando webhook.")
+    Rails.logger.info("[CRMundi] Conversa #{conversation.id} resolvida - enfileirando webhook reason=resolved")
     CrmundiWebhookJob.perform_later(conversation.id, 'resolved')
   rescue StandardError => e
     # Nunca propaga - a resolucao da conversa ja ocorreu
