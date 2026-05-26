@@ -54,10 +54,10 @@ bulk_auto_assignment_job:
   class: 'Inboxes::BulkAutoAssignmentJob'
   queue: scheduled_jobs
 
-# executed every 5 minutes
-# sends CRMundi webhook for WhatsApp/Evolution conversations inactive >= CRMUNDI_INACTIVITY_MINUTES
-# only runs when CRMUNDI_INACTIVITY_WEBHOOK_ENABLED=true
-crmundi_inactive_conversations_scanner_job:
-  cron: '*/5 * * * *'
-  class: 'CrmundiInactiveConversationsScannerJob'
-  queue: scheduled_jobs
+# DESABILITADO: scanner de inatividade CRMundi — reativar manualmente se necessário.
+# Para reativar: descomentar e setar CRMUNDI_INACTIVITY_WEBHOOK_ENABLED=true no .env
+# e reiniciar chatmundi-sidekiq.service para recarregar o schedule.yml.
+# crmundi_inactive_conversations_scanner_job:
+#   cron: '*/5 * * * *'
+#   class: 'CrmundiInactiveConversationsScannerJob'
+#   queue: scheduled_jobs

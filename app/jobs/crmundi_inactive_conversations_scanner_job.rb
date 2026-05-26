@@ -53,16 +53,18 @@ class CrmundiInactiveConversationsScannerJob < ApplicationJob
   end
 
   # ─── Busca de candidatos ───────────────────────────────────────────────────
-
-  # Busca conversas abertas/pending atualizadas nos ultimos 7 dias.
-  # Filtragem fina (canal, inatividade real, tenant, incoming, ja enviado)
-  # e feita em Ruby para evitar queries SQL complexas no MVP.
+  # Busca conversas abertas/pending atualizadas nos ultimos 7 dias em batches.
+  # Filtragem fina e feita em Ruby apos carga por batch para evitar queries SQL complexas.
   def fetch_candidates(threshold)
+    results = []
     Conversation
       .where(status: %w[open pending])
       .where('updated_at >= ?', 7.days.ago)
-      .includes(:inbox, :account, :contact, messages: [])
-      .select { |conv| eligible?(conv, threshold) }
+      .includes(:inbox, :account, :contact)
+      .find_each(batch_size: 100) do |conv|
+        results << conv if eligible?(conv, threshold)
+      end
+    results
   end
 
   # ─── Elegibilidade ────────────────────────────────────────────────────────
@@ -95,12 +97,14 @@ class CrmundiInactiveConversationsScannerJob < ApplicationJob
 
     true
   end
-
   def already_sent?(conversation)
     conversation.custom_attributes&.dig('crmundi_webhook_sent_at').present?
   end
+
   def public_messages_for(conversation)
-    conversation.messages.select do |msg|
+    # Carrega mensagens com attachments em batch para evitar N+1
+    msgs = conversation.messages.includes(:attachments).load
+    msgs.select do |msg|
       next false if msg.try(:private?)
       next false if msg.try(:activity?)
 
@@ -112,10 +116,9 @@ class CrmundiInactiveConversationsScannerJob < ApplicationJob
   end
 
   # ─── Processamento ────────────────────────────────────────────────────────
-
   def process_conversation(conversation, reason, threshold)
     last_public_at = public_messages_for(conversation).map(&:created_at).max
-    minutes_inactive = ((Time.current - last_public_at) / 60).round
+    minutes_inactive = last_public_at ? ((Time.current - last_public_at) / 60).round : '?'
 
     Rails.logger.info(
       "[CRMundi] Conversa #{conversation.id} inativa ha #{minutes_inactive} minutos - enfileirando webhook"

@@ -34,10 +34,24 @@ class CrmundiWebhookJob < ApplicationJob
     tenant_id = crmundi_tenant_id(conversation)
     return if tenant_id.blank?
 
+    # Idempotencia: jobs de inatividade nao reenviam se ja foi enviado antes.
+    # Jobs de resolved sempre enviam (atualiza o deal no CRMundi).
+    if reason.to_s.start_with?('inactivity') && already_sent?(conversation)
+      log_info("Conversa #{conversation_id} ja enviada (#{reason}) — ignorando duplicidade.")
+      return
+    end
+
     payload = build_payload(conversation)
     headers = build_headers(conversation, tenant_id)
 
-    response = RestClient.post(url, payload.to_json, headers)
+    response = RestClient::Request.execute(
+      method:       :post,
+      url:          url,
+      payload:      payload.to_json,
+      headers:      headers,
+      open_timeout: 5,   # segundos para abrir conexao TCP
+      read_timeout: 15   # segundos para receber resposta completa
+    )
 
     Rails.logger.info(
       "[CRMundi] Webhook enviado com sucesso. Conversa #{conversation.id}, status HTTP #{response.code}"
@@ -45,6 +59,20 @@ class CrmundiWebhookJob < ApplicationJob
 
     # Marca a conversa como enviada APENAS apos sucesso HTTP (evita duplicidade futura)
     mark_conversation_as_sent!(conversation, reason)
+  rescue RestClient::UnprocessableEntity, RestClient::BadRequest => e
+    # 422/400: payload invalido — nao faz sentido retry (o payload nao vai mudar)
+    Rails.logger.error(
+      "[CRMundi] CRMundi rejeitou payload (#{e.class}) para conversa #{conversation_id}. " \
+      "Sem retry. Resposta: #{e.response&.body&.first(300)}"
+    )
+    # Nao relanca — job termina sem retry
+  rescue RestClient::ExceptionWithResponse => e
+    # 5xx, etc. — pode ser transiente, permite retry normal do Sidekiq
+    Rails.logger.error(
+      "[CRMundi] Erro HTTP #{e.class} ao enviar webhook. Conversa #{conversation_id}. " \
+      "Status: #{e.response&.code}"
+    )
+    raise e
   rescue StandardError => e
     Rails.logger.error(
       "[CRMundi] Falha ao enviar webhook. Conversa #{conversation_id}. " \
@@ -106,8 +134,12 @@ class CrmundiWebhookJob < ApplicationJob
   end
 
   def build_payload(conversation)
+    # Limita a 200 mensagens mais recentes para evitar payloads gigantes.
+    # Carrega attachments em batch para evitar N+1.
     messages = conversation.messages
+                           .includes(:attachments)
                            .order(:created_at)
+                           .last(200)
                            .select { |msg| valid_message?(msg) }
                            .map { |msg| serialize_message(msg) }
 
@@ -166,7 +198,8 @@ class CrmundiWebhookJob < ApplicationJob
     if attachments.any?
       serialized[:message_type] = 'attachment'
       serialized[:attachments]  = attachments
-      Rails.logger.info(
+      # Log apenas em debug para evitar IO excessivo em producao
+      Rails.logger.debug(
         "[CRMundi] Mensagem #{message.id} com #{attachments.size} anexo(s): " \
         "#{attachments.map { |a| a[:file_name] }.join(', ')}"
       )
@@ -202,5 +235,9 @@ class CrmundiWebhookJob < ApplicationJob
 
   def log_info(message)
     Rails.logger.info("[CRMundi] #{message}")
+  end
+
+  def already_sent?(conversation)
+    conversation.custom_attributes&.dig('crmundi_webhook_sent_at').present?
   end
 end
