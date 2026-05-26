@@ -130,8 +130,12 @@ class Channel::Telegram < ApplicationRecord
     # escape html tags in text. We are subbing \n to <br> since commonmark will strip exta '\n'
     text = CGI.escapeHTML(text.gsub("\n", '<br>'))
 
-    # convert markdown to html
-    html = CommonMarker.render_html(text).strip
+    # convert markdown to html (compativel com commonmarker novo e legado)
+    html = if defined?(Commonmarker)
+             Commonmarker.to_html(text)
+           else
+             CommonMarker.render_html(text)
+           end.strip
 
     # remove all html tags except b, strong, i, em, u, ins, s, strike, del, a, code, pre, blockquote
     stripped_html = Rails::HTML5::SafeListSanitizer.new.sanitize(html, tags: %w[b strong i em u ins s strike del a code pre blockquote],

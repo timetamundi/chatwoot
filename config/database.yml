@@ -3,8 +3,8 @@ default: &default
   encoding: unicode
   host: <%= ENV.fetch('POSTGRES_HOST', 'localhost') %>
   port: <%= ENV.fetch('POSTGRES_PORT', '5432') %>
-  # Pool size ajustado para Sidekiq e Rails conforme contexto
-  pool: "<%= Sidekiq.server? ? ENV.fetch('SIDEKIQ_CONCURRENCY', 10) : ENV.fetch('RAILS_MAX_THREADS', 5) %>"
+  # Permite definir pool explicito via DB_POOL, preservando fallback por contexto.
+  pool: <%= ENV.fetch('DB_POOL') { Sidekiq.server? ? ENV.fetch('SIDEKIQ_CONCURRENCY', 3) : ENV.fetch('RAILS_MAX_THREADS', 5) } %>
   # Frequência para reaping das conexões inativas (segundos)
   reaping_frequency: <%= ENV.fetch('DB_POOL_REAPING_FREQUENCY', 30) %>
   variables:

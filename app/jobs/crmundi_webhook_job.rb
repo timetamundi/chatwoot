@@ -66,11 +66,30 @@ class CrmundiWebhookJob < ApplicationJob
       "Sem retry. Resposta: #{e.response&.body&.first(300)}"
     )
     # Nao relanca — job termina sem retry
+  rescue RestClient::Unauthorized, RestClient::Forbidden => e
+    Rails.logger.error(
+      "[CRMundi] Falha de autorizacao (#{e.class}) ao enviar webhook da conversa #{conversation_id}. " \
+      'Verifique CRMUNDI_WEBHOOK_TOKEN/permissoes no destino. Sem retry.'
+    )
+    # Nao relanca — erro nao-transiente sem alteracao de credencial
   rescue RestClient::ExceptionWithResponse => e
-    # 5xx, etc. — pode ser transiente, permite retry normal do Sidekiq
+    # Retry apenas para falhas transientes (timeout/5xx).
+    status = e.response&.code.to_i
+    if status >= 500
+      Rails.logger.error(
+        "[CRMundi] Erro HTTP transiente #{status} ao enviar webhook. Conversa #{conversation_id}. Retry habilitado."
+      )
+      raise e
+    end
+
     Rails.logger.error(
       "[CRMundi] Erro HTTP #{e.class} ao enviar webhook. Conversa #{conversation_id}. " \
-      "Status: #{e.response&.code}"
+      "Status: #{e.response&.code}. Sem retry."
+    )
+    # Nao relanca para 4xx nao-transientes
+  rescue RestClient::Exceptions::OpenTimeout, RestClient::Exceptions::ReadTimeout, Net::OpenTimeout, Net::ReadTimeout => e
+    Rails.logger.error(
+      "[CRMundi] Timeout ao enviar webhook da conversa #{conversation_id}: #{e.class}. Retry habilitado."
     )
     raise e
   rescue StandardError => e
