@@ -98,3 +98,7 @@ CLAUDE.local.md
 pgvector/
 node_modules/
 vendor/
+
+# Histoire deployment
+.netlify
+.histoire
