@@ -3,9 +3,9 @@ class ChatwootMarkdownRenderer
     @content = content
   end
 
-  def render_message
-    markdown_renderer = BaseMarkdownRenderer.new
-    doc = parse_markdown(@content)
+  def render_message(hardbreaks: false)
+    markdown_renderer = BaseMarkdownRenderer.new(options: hardbreaks ? [:HARDBREAKS] : :DEFAULT)
+    doc = parse_markdown(@content, hardbreaks: hardbreaks)
     html = markdown_renderer.render(doc)
     render_as_html_safe(html)
   end
@@ -28,11 +28,11 @@ class ChatwootMarkdownRenderer
 
   private
 
-  def parse_markdown(content)
+  def parse_markdown(content, hardbreaks: false)
     if defined?(Commonmarker)
-      Commonmarker.parse(content)
+      Commonmarker.parse(content, options: hardbreaks ? [:HARDBREAKS] : :DEFAULT)
     else
-      CommonMarker.render_doc(content, :DEFAULT)
+      CommonMarker.render_doc(content, :DEFAULT, [:strikethrough, :autolink])
     end
   end
 

@@ -37,6 +37,7 @@ module Chatwoot
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 7.0
+    config.rails_i18n.enabled_modules = [:pluralization]
 
     config.autoload_paths << Rails.root.join('lib')
 
