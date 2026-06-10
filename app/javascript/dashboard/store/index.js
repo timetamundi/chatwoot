@@ -14,6 +14,7 @@ import bulkActions from './modules/bulkActions';
 import campaigns from './modules/campaigns';
 import cannedResponse from './modules/cannedResponse';
 import categories from './modules/helpCenterCategories';
+import companies from './modules/companies';
 import contactConversations from './modules/contactConversations';
 import contactLabels from './modules/contactLabels';
 import contactNotes from './modules/contactNotes';
@@ -57,6 +58,7 @@ import copilotThreads from './captain/copilotThreads';
 import copilotMessages from './captain/copilotMessages';
 import captainScenarios from './captain/scenarios';
 import captainTools from './captain/tools';
+import captainCustomTools from './captain/customTools';
 
 const plugins = [];
 
@@ -76,6 +78,7 @@ export default createStore({
     campaigns,
     cannedResponse,
     categories,
+    companies,
     contactConversations,
     contactLabels,
     contactNotes,
@@ -119,6 +122,7 @@ export default createStore({
     copilotMessages,
     captainScenarios,
     captainTools,
+    captainCustomTools,
   },
   plugins,
 });
