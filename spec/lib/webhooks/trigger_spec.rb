@@ -40,7 +40,8 @@ describe Webhooks::Trigger do
         headers: base_headers,
         open_timeout: webhook_timeout,
         read_timeout: webhook_timeout,
-        validate_content_type: false
+        validate_content_type: false,
+        allow_private_network: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)
@@ -65,8 +66,40 @@ describe Webhooks::Trigger do
     it 'treats blocked private webhook URLs as failures' do
       payload = { event: 'message_created', conversation: { id: conversation.id }, id: message.id }
 
-      expect { trigger.execute('http://127.0.0.1/webhook', payload, webhook_type) }
+      expect { trigger.execute('http://192.168.0.10/webhook', payload, webhook_type) }
         .to change { message.reload.status }.from('sent').to('failed')
+    end
+
+    it 'allows localhost API inbox webhooks in local environments' do
+      expect(SafeFetch).to receive(:fetch).with(
+        'http://localhost:8080/chatwoot/webhook/teste',
+        method: :post,
+        body: payload.to_json,
+        headers: base_headers,
+        open_timeout: webhook_timeout,
+        read_timeout: webhook_timeout,
+        validate_content_type: false,
+        allow_private_network: true
+      ).and_yield(fetch_result)
+
+      trigger.execute('http://localhost:8080/chatwoot/webhook/teste', payload, webhook_type)
+    end
+
+    it 'keeps local webhook URLs blocked outside local environments' do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::StringInquirer.new('production'))
+
+      expect(SafeFetch).to receive(:fetch).with(
+        'http://localhost:8080/chatwoot/webhook/teste',
+        method: :post,
+        body: payload.to_json,
+        headers: base_headers,
+        open_timeout: webhook_timeout,
+        read_timeout: webhook_timeout,
+        validate_content_type: false,
+        allow_private_network: false
+      ).and_yield(fetch_result)
+
+      trigger.execute('http://localhost:8080/chatwoot/webhook/teste', payload, webhook_type)
     end
 
     context 'when webhook type is agent bot' do
@@ -188,7 +221,8 @@ describe Webhooks::Trigger do
           headers: base_headers,
           open_timeout: webhook_timeout,
           read_timeout: webhook_timeout,
-          validate_content_type: false
+          validate_content_type: false,
+          allow_private_network: false
         ).and_yield(fetch_result)
 
         trigger.execute(url, payload, webhook_type)
@@ -276,7 +310,8 @@ describe Webhooks::Trigger do
         headers: base_headers,
         open_timeout: default_timeout,
         read_timeout: default_timeout,
-        validate_content_type: false
+        validate_content_type: false,
+        allow_private_network: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)
@@ -294,7 +329,8 @@ describe Webhooks::Trigger do
         headers: base_headers,
         open_timeout: default_timeout,
         read_timeout: default_timeout,
-        validate_content_type: false
+        validate_content_type: false,
+        allow_private_network: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)

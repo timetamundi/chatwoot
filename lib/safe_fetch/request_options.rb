@@ -9,7 +9,8 @@ class SafeFetch::RequestOptions
     http_basic_authentication: nil,
     allowed_content_type_prefixes: SafeFetch::DEFAULT_ALLOWED_CONTENT_TYPE_PREFIXES,
     allowed_content_types: SafeFetch::DEFAULT_ALLOWED_CONTENT_TYPES,
-    validate_content_type: true
+    validate_content_type: true,
+    allow_private_network: false
   }.freeze
 
   attr_reader :allowed_content_type_prefixes, :allowed_content_types, :body, :headers,
@@ -29,6 +30,7 @@ class SafeFetch::RequestOptions
     @allowed_content_type_prefixes = Array(config[:allowed_content_type_prefixes])
     @allowed_content_types = Array(config[:allowed_content_types])
     @validate_content_type = config[:validate_content_type]
+    @allow_private_network = config[:allow_private_network]
   end
 
   def effective_max_bytes
@@ -51,6 +53,10 @@ class SafeFetch::RequestOptions
 
   def validate_content_type?
     @validate_content_type
+  end
+
+  def allow_private_network?
+    @allow_private_network
   end
 
   def resolver
