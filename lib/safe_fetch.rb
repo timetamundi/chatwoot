@@ -7,6 +7,7 @@ module SafeFetch
   DEFAULT_OPEN_TIMEOUT = 2
   DEFAULT_READ_TIMEOUT = 20
   DEFAULT_MAX_BYTES_FALLBACK_MB = 40
+  LOCAL_URL_HOSTS = %w[localhost 127.0.0.1 host.docker.internal].freeze
 
   Result = Data.define(:tempfile, :filename, :content_type) do
     def original_filename
@@ -37,5 +38,9 @@ module SafeFetch
 
   def self.allow_private_network?
     ActiveModel::Type::Boolean.new.cast(ENV.fetch('SAFE_FETCH_ALLOW_PRIVATE_NETWORK', false))
+  end
+
+  def self.local_url?(uri)
+    LOCAL_URL_HOSTS.include?(uri.hostname.to_s.downcase)
   end
 end

@@ -40,9 +40,20 @@ class SafeFetch::Fetcher
   end
 
   def perform_request(&)
-    return SafeFetch::PrivateNetworkRequest.new(options).perform(&) if options.allow_private_network? || SafeFetch.allow_private_network?
+    return SafeFetch::PrivateNetworkRequest.new(options).perform(&) if allow_private_network_request?
 
     SsrfFilter.public_send(options.method, options.url, **options.request_options, &)
+  end
+
+  def allow_private_network_request?
+    SafeFetch.allow_private_network? || allow_local_url?
+  end
+
+  def allow_local_url?
+    return false unless options.allow_local_url?
+    return false unless defined?(Rails) && (Rails.env.development? || Rails.env.test?)
+
+    SafeFetch.local_url?(options.uri)
   end
 
   def validate_content_type!(content_type)

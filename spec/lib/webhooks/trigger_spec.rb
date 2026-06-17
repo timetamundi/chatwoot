@@ -41,7 +41,7 @@ describe Webhooks::Trigger do
         open_timeout: webhook_timeout,
         read_timeout: webhook_timeout,
         validate_content_type: false,
-        allow_private_network: false
+        allow_local_url: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)
@@ -79,10 +79,25 @@ describe Webhooks::Trigger do
         open_timeout: webhook_timeout,
         read_timeout: webhook_timeout,
         validate_content_type: false,
-        allow_private_network: true
+        allow_local_url: true
       ).and_yield(fetch_result)
 
       trigger.execute('http://localhost:8080/chatwoot/webhook/teste', payload, webhook_type)
+    end
+
+    it 'allows localhost API inbox webhooks when webhook type is deserialized as string' do
+      expect(SafeFetch).to receive(:fetch).with(
+        'http://localhost:8080/chatwoot/webhook/teste',
+        method: :post,
+        body: payload.to_json,
+        headers: base_headers,
+        open_timeout: webhook_timeout,
+        read_timeout: webhook_timeout,
+        validate_content_type: false,
+        allow_local_url: true
+      ).and_yield(fetch_result)
+
+      trigger.execute('http://localhost:8080/chatwoot/webhook/teste', payload, 'api_inbox_webhook')
     end
 
     it 'keeps local webhook URLs blocked outside local environments' do
@@ -96,7 +111,7 @@ describe Webhooks::Trigger do
         open_timeout: webhook_timeout,
         read_timeout: webhook_timeout,
         validate_content_type: false,
-        allow_private_network: false
+        allow_local_url: false
       ).and_yield(fetch_result)
 
       trigger.execute('http://localhost:8080/chatwoot/webhook/teste', payload, webhook_type)
@@ -222,7 +237,7 @@ describe Webhooks::Trigger do
           open_timeout: webhook_timeout,
           read_timeout: webhook_timeout,
           validate_content_type: false,
-          allow_private_network: false
+          allow_local_url: false
         ).and_yield(fetch_result)
 
         trigger.execute(url, payload, webhook_type)
@@ -311,7 +326,7 @@ describe Webhooks::Trigger do
         open_timeout: default_timeout,
         read_timeout: default_timeout,
         validate_content_type: false,
-        allow_private_network: false
+        allow_local_url: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)
@@ -330,7 +345,7 @@ describe Webhooks::Trigger do
         open_timeout: default_timeout,
         read_timeout: default_timeout,
         validate_content_type: false,
-        allow_private_network: false
+        allow_local_url: false
       ).and_yield(fetch_result)
 
       trigger.execute(url, payload, webhook_type)

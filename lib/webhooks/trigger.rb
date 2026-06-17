@@ -1,7 +1,6 @@
 class Webhooks::Trigger
   SUPPORTED_ERROR_HANDLE_EVENTS = %w[message_created message_updated].freeze
   RETRYABLE_AGENT_BOT_STATUSES = [429, 500].freeze
-  LOCAL_EVOLUTION_HOSTS = %w[localhost 127.0.0.1 host.docker.internal].freeze
 
   class RetryableError < StandardError
     attr_reader :status
@@ -15,7 +14,7 @@ class Webhooks::Trigger
   def initialize(url, payload, webhook_type, secret: nil, delivery_id: nil)
     @url = url
     @payload = payload
-    @webhook_type = webhook_type
+    @webhook_type = webhook_type.to_s
     @secret = secret
     @delivery_id = delivery_id
   end
@@ -41,6 +40,9 @@ class Webhooks::Trigger
 
   def perform_request
     body = @payload.to_json
+    allow_local_url = allow_local_evolution_webhook?
+    log_local_evolution_decision(allow_local_url)
+
     SafeFetch.fetch(
       @url,
       method: :post,
@@ -49,7 +51,7 @@ class Webhooks::Trigger
       open_timeout: webhook_timeout,
       read_timeout: webhook_timeout,
       validate_content_type: false,
-      allow_private_network: allow_local_evolution_webhook?
+      allow_local_url: allow_local_url
     ) { |_response| nil }
   end
 
@@ -69,9 +71,9 @@ class Webhooks::Trigger
     return unless message
 
     case @webhook_type
-    when :agent_bot_webhook
+    when 'agent_bot_webhook'
       update_conversation_status(message)
-    when :api_inbox_webhook
+    when 'api_inbox_webhook'
       update_message_status(error)
     end
   end
@@ -125,23 +127,49 @@ class Webhooks::Trigger
   end
 
   def retryable_agent_bot_error?(error)
-    @webhook_type == :agent_bot_webhook && RETRYABLE_AGENT_BOT_STATUSES.include?(http_status(error))
+    @webhook_type == 'agent_bot_webhook' && RETRYABLE_AGENT_BOT_STATUSES.include?(http_status(error))
   end
 
   def allow_local_evolution_webhook?
-    return false unless @webhook_type == :api_inbox_webhook
+    return false unless @webhook_type == 'api_inbox_webhook'
     return false unless Rails.env.development? || Rails.env.test?
-    return false unless local_evolution_host?
 
-    Rails.logger.info('Allowing local webhook URL in development for Evolution integration')
-    true
+    local_evolution_host?
   end
 
   def local_evolution_host?
     uri = URI.parse(@url)
-    LOCAL_EVOLUTION_HOSTS.include?(uri.hostname.to_s.downcase)
+    SafeFetch.local_url?(uri)
   rescue URI::InvalidURIError
     false
+  end
+
+  def log_local_evolution_decision(allow_local_url)
+    return unless Rails.env.development? || Rails.env.test?
+    return unless @webhook_type == 'api_inbox_webhook'
+
+    Rails.logger.info(
+      'Local Evolution webhook URL decision ' \
+      "event=#{@payload[:event] || @payload['event']} " \
+      "webhook_type=#{@webhook_type} " \
+      "inbox_id=#{payload_inbox_value(:id)} " \
+      "channel_type=#{payload_inbox_value(:channel_type)} " \
+      "webhook_host=#{webhook_host} " \
+      "allow_local_url=#{allow_local_url}"
+    )
+  end
+
+  def payload_inbox_value(key)
+    inbox = @payload[:inbox] || @payload['inbox']
+    return unless inbox.respond_to?(:[])
+
+    inbox[key] || inbox[key.to_s]
+  end
+
+  def webhook_host
+    URI.parse(@url).hostname
+  rescue URI::InvalidURIError
+    nil
   end
 
   def http_status(error)
