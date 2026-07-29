@@ -80,6 +80,7 @@ class Inbox < ApplicationRecord
   after_destroy :delete_round_robin_agents
 
   after_create_commit :dispatch_create_event
+  after_create_commit :ensure_chatmundi_technical_user_access
   after_update_commit :dispatch_update_event
 
   scope :order_by_name, -> { order('lower(name) ASC') }
@@ -245,6 +246,10 @@ class Inbox < ApplicationRecord
     return if ENV['ENABLE_INBOX_EVENTS'].blank?
 
     Rails.configuration.dispatcher.dispatch(INBOX_CREATED, Time.zone.now, inbox: self)
+  end
+
+  def ensure_chatmundi_technical_user_access
+    Chatmundi::EnsureTechnicalUserAccessService.call(inbox: self)
   end
 
   def dispatch_update_event
