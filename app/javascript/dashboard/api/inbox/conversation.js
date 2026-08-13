@@ -56,6 +56,10 @@ class ConversationApi extends ApiClient {
     });
   }
 
+  sendToCrmundiPipeline(conversationId) {
+    return axios.post(`${this.url}/${conversationId}/crmundi_pipeline`);
+  }
+
   togglePriority({ conversationId, priority }) {
     return axios.post(`${this.url}/${conversationId}/toggle_priority`, {
       priority,

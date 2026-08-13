@@ -472,6 +472,11 @@ const actions = {
     await ConversationApi.sendEmailTranscript({ conversationId, email });
   },
 
+  // Envio manual e direto ao Pipeline CRMundi, desacoplado da resolucao da conversa.
+  sendToCrmundiPipeline: async (_, conversationId) => {
+    await ConversationApi.sendToCrmundiPipeline(conversationId);
+  },
+
   updateCustomAttributes: async (
     { commit },
     { conversationId, customAttributes }
