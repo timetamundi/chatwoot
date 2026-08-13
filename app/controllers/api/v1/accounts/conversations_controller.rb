@@ -91,6 +91,26 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     assign_conversation if should_assign_conversation?
   end
 
+  # Envio manual e direto ao Pipeline CRMundi, desacoplado da resolucao da conversa
+  # (botao "Enviar para Pipeline"). Reaproveita o mesmo CrmundiWebhookJob usado pelo
+  # listener de conversation_resolved, apenas com reason diferente.
+  def crmundi_pipeline
+    if Crmundi::ConversationEligibility.group_conversation?(@conversation)
+      return render json: { error: 'Grupos do WhatsApp não podem ser enviados ao Pipeline (sem telefone de contato único)' }, status: :unprocessable_entity
+    end
+
+    unless Crmundi::ConversationEligibility.whatsapp_or_evolution?(@conversation)
+      return render json: { error: 'Canal não elegível para envio ao Pipeline CRMundi' }, status: :unprocessable_entity
+    end
+
+    if Crmundi::ConversationEligibility.tenant_for(@conversation).blank?
+      return render json: { error: 'Conta sem tenant CRMundi configurado' }, status: :unprocessable_entity
+    end
+
+    CrmundiWebhookJob.perform_later(@conversation.id, 'manual')
+    render json: { success: true }
+  end
+
   def pending_to_open_by_bot?
     return false unless Current.user.is_a?(AgentBot)
 

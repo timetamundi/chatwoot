@@ -16,6 +16,8 @@ module Crmundi
     #          → qualquer Channel::Api de account CRMundi e elegivel
     #          → o job bloqueia o envio se nao houver tenant de qualquer forma
     def whatsapp_or_evolution?(conversation)
+      return false if group_conversation?(conversation)
+
       inbox = conversation.inbox
       return false unless inbox
 
@@ -41,6 +43,14 @@ module Crmundi
       end
 
       false
+    end
+
+    # Grupos do WhatsApp (Baileys/Evolution) nao tem um numero de telefone unico
+    # associado ao contato — o payload de lead do CRMundi exige "phone" (string
+    # obrigatoria), entao grupos nunca sao elegiveis para virar Lead/Deal no Pipeline.
+    def group_conversation?(conversation)
+      identifier = conversation.contact&.identifier.to_s
+      identifier.end_with?('@g.us')
     end
 
     # Retorna o tenant CRMundi salvo na Account via SSO, ou nil se ausente.
