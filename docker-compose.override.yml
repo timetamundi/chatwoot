@@ -1,0 +1,111 @@
+# Dev-workflow overrides for docker-compose.yaml.
+#
+# This file is picked up automatically by `docker compose up` (no -f needed).
+# It adds healthchecks, fixes Postgres/Redis persistence, and bridges rails/
+# sidekiq/mailhog to the shared chatmundi_dev network so this Chatwoot
+# instance can talk to the other ChatMundi services (chat-mundi FastAPI
+# orchestrator, Evolution API), which live in separate repos/composes.
+#
+# It never edits docker-compose.yaml itself — only adds/merges on top of it.
+# See docs/local-docker-dev.md for the full runbook.
+#
+# One-time setup before first `docker compose up` (each dev, on their own
+# machine):
+#   docker network create chatmundi_dev
+
+services:
+  postgres:
+    # docker-compose.yaml mounts the named volume at /data/postgres, but the
+    # pgvector/pgvector image (built on the official postgres image) writes
+    # to /var/lib/postgresql/data by default, so that mount never actually
+    # persists anything. This adds a second, correctly-targeted volume so
+    # data survives `docker compose down`. The pgvector extension itself
+    # ships with the image, unaffected by this.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      # docker-compose.yaml hardcodes POSTGRES_PASSWORD to an empty string
+      # for local trust-auth. Newer postgres images refuse to start with an
+      # empty password unless this is set explicitly (they used to just
+      # warn). Local dev only — never do this in production.
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    # Same issue as postgres: the official redis image writes to /data by
+    # default, not /data/redis.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rails:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # docker-compose.yaml sets VITE_DEV_SERVER_HOST, but current
+      # vite_ruby only reads env vars prefixed VITE_RUBY_ (see
+      # vite_ruby-*/lib/vite_ruby.rb ENV_PREFIX). Without this, Rails'
+      # dev-server proxy can't find the vite container to fetch assets/HMR.
+      - VITE_RUBY_HOST=vite
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - default
+      - chatmundi_dev
+
+  sidekiq:
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+      - chatmundi_dev
+
+  mailhog:
+    # No exec-based healthcheck here: the mailhog image doesn't reliably
+    # ship a shell/curl/wget to probe with, so a fabricated check could
+    # sit "unhealthy" forever and block anything depending on it.
+    networks:
+      - default
+      - chatmundi_dev
+
+  vite:
+    environment:
+      # See the note on the rails service above: VITE_DEV_SERVER_HOST (set
+      # by docker-compose.yaml) is not read by current vite_ruby/vite-
+      # plugin-ruby versions. Without VITE_RUBY_HOST=0.0.0.0, Vite binds to
+      # loopback only (::1) and is unreachable from the host or other
+      # containers, even though the container port is published.
+      - VITE_RUBY_HOST=0.0.0.0
+
+networks:
+  default: {}
+  # External network shared with the other ChatMundi repos (chat-mundi
+  # FastAPI orchestrator, Evolution API). Create it once with:
+  #   docker network create chatmundi_dev
+  # Only rails, sidekiq and mailhog are attached to it — postgres, redis and
+  # vite stay on the project-local network only. This project's Postgres/
+  # Redis must never be reachable from, or reused by, other stacks.
+  chatmundi_dev:
+    external: true
+
+volumes:
+  postgres_data:
+  redis_data:
