@@ -30,7 +30,7 @@ module Chatmundi
     def ensure_technical_user
       user = User.find_or_initialize_by(email: TECHNICAL_EMAIL)
       if user.new_record?
-        password = SecureRandom.base58(32)
+        password = "#{SecureRandom.base58(31)}!"
         user.assign_attributes(
           name: TECHNICAL_NAME,
           password: password,
