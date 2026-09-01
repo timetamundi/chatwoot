@@ -331,4 +331,90 @@ RSpec.describe Attachment do
       expect(attachment.errors[:file]).to include('size is too big')
     end
   end
+
+  describe '#fix_ogg_audio_container' do
+    # Fixture real: um áudio de voz gravado via MediaRecorder no ChatMundi,
+    # capturado ao vivo em dev. Bytes começam com "OggS", decodifica limpo
+    # via ffmpeg (dados 100% íntegros), mas nenhuma das páginas Ogg tem a
+    # flag de EOS ligada — o container nunca foi finalizado. É exatamente o
+    # arquivo que reproduzia só ~3s no Chrome antes do fix.
+    let(:broken_ogg_path) { Rails.root.join('spec/assets/broken_ogg_no_eos.oga') }
+
+    def ogg_pages(bytes)
+      pages = []
+      idx = 0
+      while (idx = bytes.index('OggS', idx))
+        flags = bytes.getbyte(idx + 5)
+        pages << { bos: flags.anybits?(0x02), eos: flags.anybits?(0x04) }
+        idx += 4
+      end
+      pages
+    end
+
+    # after_create_commit não dispara dentro da transação de teste do RSpec
+    # (o arquivo só termina de ser gravado no storage depois do commit de
+    # verdade — por isso é after_create_commit e não after_create, ver
+    # comentário no model). Chamamos o método direto depois do save pra
+    # testar a lógica de verdade, do mesmo jeito que ela roda em produção.
+    def trigger_callback(attachment)
+      attachment.send(:fix_ogg_audio_container)
+    end
+
+    it 'remuxes the container so the last Ogg page carries the EOS flag' do
+      attachment = message.attachments.new(account_id: message.account_id, file_type: :audio)
+      attachment.file.attach(io: broken_ogg_path.open, filename: 'voice.oga', content_type: 'audio/opus')
+      attachment.save!
+
+      pages_before = ogg_pages(attachment.file.download)
+      expect(pages_before.first[:bos]).to be true
+      expect(pages_before.any? { |p| p[:eos] }).to be false
+
+      trigger_callback(attachment)
+
+      pages_after = ogg_pages(attachment.file.reload.download)
+      expect(pages_after.last[:eos]).to be true
+    end
+
+    it 'also corrects content_type from audio/opus to audio/ogg' do
+      attachment = message.attachments.new(account_id: message.account_id, file_type: :audio)
+      attachment.file.attach(io: broken_ogg_path.open, filename: 'voice.oga', content_type: 'audio/opus')
+      attachment.save!
+      trigger_callback(attachment)
+
+      expect(attachment.file.blob.reload.content_type).to eq('audio/ogg')
+    end
+
+    it 'preserves the actual audio duration after remuxing (no data loss)' do
+      attachment = message.attachments.new(account_id: message.account_id, file_type: :audio)
+      attachment.file.attach(io: broken_ogg_path.open, filename: 'voice.oga', content_type: 'audio/opus')
+      attachment.save!
+      trigger_callback(attachment)
+
+      # A última página, com granule position 48000 amostras/s, é a fonte da
+      # verdade da duração real do áudio — comparamos com o arquivo original
+      # (11.1s) pra garantir que o remux não perdeu nem cortou nada.
+      remuxed_bytes = attachment.file.reload.download
+      idx = remuxed_bytes.rindex('OggS')
+      granule = remuxed_bytes[(idx + 6)..(idx + 13)].unpack1('Q<')
+      expect(granule / 48_000.0).to be_within(0.5).of(11.1)
+    end
+
+    it 'does not touch non-audio attachments' do
+      attachment = message.attachments.new(account_id: message.account_id, file_type: :image)
+      attachment.file.attach(io: broken_ogg_path.open, filename: 'weird.png', content_type: 'audio/opus')
+      attachment.save!
+      trigger_callback(attachment)
+
+      expect(attachment.file.blob.reload.content_type).to eq('audio/opus')
+    end
+
+    it 'does not touch files that are not really an Ogg container' do
+      attachment = message.attachments.new(account_id: message.account_id, file_type: :audio)
+      attachment.file.attach(io: StringIO.new('not-an-ogg-file-at-all'), filename: 'voice.opus', content_type: 'audio/opus')
+      attachment.save!
+      trigger_callback(attachment)
+
+      expect(attachment.file.blob.reload.content_type).to eq('audio/opus')
+    end
+  end
 end

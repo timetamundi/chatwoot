@@ -21,6 +21,9 @@ class Messages::MessageBuilder
   end
 
   def perform
+    existing_message = find_existing_message_by_source_id
+    return existing_message if existing_message
+
     @message = @conversation.messages.build(message_params)
     process_attachments
     process_emails
@@ -127,6 +130,23 @@ class Messages::MessageBuilder
     return if @params[:sender_type] != 'AgentBot'
 
     AgentBot.where(account_id: [nil, @conversation.account.id]).find_by(id: @params[:sender_id])
+  end
+
+  # Mesmo padrão de Whatsapp::IncomingMessageServiceHelpers#find_message_by_source_id,
+  # só que aplicado no builder genérico — canais como Channel::Api (usado pela
+  # integração da Evolution) não passam pelo fluxo de incoming do WhatsApp Cloud
+  # nativo, então nunca tinham essa proteção. Sem isso, um reenvio do mesmo
+  # webhook (retry por timeout, comum) cria uma segunda mensagem idêntica em vez
+  # de ser ignorado — foi exatamente o padrão de "imagem duplicada" encontrado
+  # em prod (mesmo WAID, duas contas/linhas diferentes).
+  # Escopado pra mesma conversa: um WAID não deveria se repetir em conversas
+  # diferentes na prática, mas restringir a esse escopo evita qualquer risco de
+  # colisão cruzada por conta/tenant.
+  def find_existing_message_by_source_id
+    source_id = @params[:source_id]
+    return nil if source_id.blank?
+
+    @conversation.messages.find_by(source_id: source_id)
   end
 
   def message_params

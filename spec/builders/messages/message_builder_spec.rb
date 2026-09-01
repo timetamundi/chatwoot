@@ -20,6 +20,35 @@ describe Messages::MessageBuilder do
       message = message_builder
       expect(message.content).to eq params[:content]
     end
+
+    context 'when a message with the same source_id already exists in the conversation' do
+      let(:params) do
+        ActionController::Parameters.new({
+                                           content: 'test',
+                                           source_id: 'WAID:duplicate-source-id'
+                                         })
+      end
+
+      it 'returns the existing message instead of creating a duplicate' do
+        first_message = described_class.new(user, conversation, params).perform
+
+        expect do
+          described_class.new(user, conversation, params).perform
+        end.not_to change(conversation.messages, :count)
+
+        second_message = described_class.new(user, conversation, params).perform
+        expect(second_message.id).to eq first_message.id
+      end
+    end
+
+    context 'when source_id is blank' do
+      it 'creates a new message every time (no false-positive dedup)' do
+        expect do
+          described_class.new(user, conversation, params).perform
+          described_class.new(user, conversation, params).perform
+        end.to change(conversation.messages, :count).by(2)
+      end
+    end
   end
 
   describe '#content_attributes' do

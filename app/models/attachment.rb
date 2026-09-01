@@ -1,3 +1,5 @@
+require 'open3'
+
 # == Schema Information
 #
 # Table name: attachments
@@ -42,6 +44,10 @@ class Attachment < ApplicationRecord
   belongs_to :message
   has_one_attached :file
   before_save :set_extension
+  # after_create_commit, não after_create: o arquivo só termina de ser
+  # gravado no storage depois do commit — chamar download_chunk antes disso
+  # estoura ActiveStorage::FileNotFoundError (confirmado ao vivo).
+  after_create_commit :fix_ogg_audio_container
   validate :acceptable_file
   validates :external_url, length: { maximum: Limits::URL_LENGTH_LIMIT }
   enum file_type: { :image => 0, :audio => 1, :video => 2, :file => 3, :location => 4, :fallback => 5, :share => 6, :story_mention => 7,
@@ -189,6 +195,58 @@ class Attachment < ApplicationRecord
     return unless message.inbox.channel_type == 'Channel::WebWidget'
 
     true
+  end
+
+  # Áudio de voz gravado via MediaRecorder (no navegador, botão de gravar do
+  # ChatMundi) sai como um container Ogg-Opus "cru" — nunca finalizado
+  # (nenhuma página tem a flag de EOS ligada, confirmado inspecionando os
+  # bytes). Isso faz o player nativo de alguns navegadores (Chrome) tocar só
+  # os primeiros segundos e parar, mesmo com o arquivo 100% íntegro e
+  # completo (decodifica limpo via ffmpeg, os dados estão todos lá — só o
+  # container nunca foi "fechado" direito).
+  #
+  # Fix: remux via ffmpeg (`-c copy`, sem recodificar, sem perda de
+  # qualidade) — só reorganiza o container Ogg com Cues/EOS corretos.
+  # Testado manualmente: arquivo original tinha 4 páginas Ogg, nenhuma com
+  # EOS; depois do remux, 13 páginas, última com EOS=true.
+  #
+  # De passagem já corrige um segundo bug relacionado: às vezes o
+  # content_type chega marcado como "audio/opus" (stream cru, sem container)
+  # quando na real é "audio/ogg" (container Ogg com Opus dentro) — o
+  # blob.upload abaixo já resolve isso via content_type explícito.
+  def fix_ogg_audio_container
+    return unless file_type == 'audio' && file.attached?
+
+    blob = file.blob
+    magic = blob.download_chunk(0..3)
+    return unless magic == 'OggS'
+
+    Tempfile.create(['attachment_in', blob.filename.extension_with_delimiter]) do |input|
+      input.binmode
+      blob.download { |chunk| input.write(chunk) }
+      input.flush
+
+      output_path = "#{input.path}.remuxed.oga"
+      begin
+        _stdout, stderr, status = Open3.capture3(
+          'ffmpeg', '-y', '-v', 'error', '-i', input.path, '-c', 'copy', output_path
+        )
+        unless status.success? && File.exist?(output_path) && File.size(output_path).positive?
+          Rails.logger.error("[Attachment] remux ffmpeg falhou attachment_id=#{id}: #{stderr}")
+          return
+        end
+
+        File.open(output_path, 'rb') do |remuxed|
+          blob.upload(remuxed, identify: false)
+          blob.content_type = 'audio/ogg'
+          blob.save!
+        end
+      ensure
+        File.delete(output_path) if File.exist?(output_path)
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.error("[Attachment] falha ao remuxar áudio ogg attachment_id=#{id}: #{e.message}")
   end
 
   def acceptable_file
