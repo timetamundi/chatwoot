@@ -1,6 +1,18 @@
+require 'ipaddr'
+require 'resolv'
+
 class Webhooks::Trigger
   SUPPORTED_ERROR_HANDLE_EVENTS = %w[message_created message_updated].freeze
   RETRYABLE_AGENT_BOT_STATUSES = [429, 500].freeze
+  # RFC1918 — cobre qualquer host de container Docker na rede compartilhada
+  # (evolution-api, etc.), sem precisar hardcodar nomes especificos em
+  # SafeFetch::LOCAL_URL_HOSTS (que e uma whitelist global, usada por todo
+  # webhook do app, nao so o da Evolution).
+  PRIVATE_IP_RANGES = [
+    IPAddr.new('10.0.0.0/8'),
+    IPAddr.new('172.16.0.0/12'),
+    IPAddr.new('192.168.0.0/16')
+  ].freeze
 
   class RetryableError < StandardError
     attr_reader :status
@@ -139,8 +151,21 @@ class Webhooks::Trigger
 
   def local_evolution_host?
     uri = URI.parse(@url)
-    SafeFetch.local_url?(uri)
+    SafeFetch.local_url?(uri) || private_docker_network_host?(uri.hostname)
   rescue URI::InvalidURIError
+    false
+  end
+
+  # Resolve o hostname (ex.: "evolution-api", nome do container/service do
+  # docker-compose) e verifica se o IP resultante e privado — cobre qualquer
+  # nome de servico na rede compartilhada chatmundi_dev sem manter uma lista
+  # fixa de nomes de container.
+  def private_docker_network_host?(hostname)
+    return false if hostname.blank?
+
+    address = Resolv.getaddress(hostname)
+    PRIVATE_IP_RANGES.any? { |range| range.include?(IPAddr.new(address)) }
+  rescue Resolv::ResolvError, IPAddr::Error, IPAddr::AddressFamilyError
     false
   end
 

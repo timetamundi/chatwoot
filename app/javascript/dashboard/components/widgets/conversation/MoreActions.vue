@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onUnmounted } from 'vue';
+import { computed, onUnmounted, ref } from 'vue';
 import { useToggle } from '@vueuse/core';
 import { useStore } from 'vuex';
 import { useAlert } from 'dashboard/composables';
@@ -22,8 +22,24 @@ const { t } = useI18n();
 
 const [showEmailActionsModal, toggleEmailModal] = useToggle(false);
 const [showActionsDropdown, toggleDropdown] = useToggle(false);
+const isSendingToPipeline = ref(false);
 
 const currentChat = computed(() => store.getters.getSelectedChat);
+
+const sendToPipeline = async () => {
+  isSendingToPipeline.value = true;
+  try {
+    await store.dispatch('sendToCrmundiPipeline', currentChat.value.id);
+    useAlert(t('CONVERSATION.HEADER.SEND_TO_PIPELINE_SUCCESS'));
+  } catch (error) {
+    useAlert(
+      error?.response?.data?.error ||
+        t('CONVERSATION.HEADER.SEND_TO_PIPELINE_ERROR')
+    );
+  } finally {
+    isSendingToPipeline.value = false;
+  }
+};
 
 const actionMenuItems = computed(() => {
   const items = [];
@@ -95,6 +111,16 @@ onUnmounted(() => {
     <ResolveAction
       :conversation-id="currentChat.id"
       :status="currentChat.status"
+    />
+    <ButtonV4
+      v-tooltip="$t('CONVERSATION.HEADER.SEND_TO_PIPELINE_ACTION')"
+      size="sm"
+      variant="ghost"
+      color="slate"
+      icon="i-lucide-kanban-square"
+      :is-loading="isSendingToPipeline"
+      class="rounded-md hover:bg-n-alpha-2"
+      @click="sendToPipeline"
     />
     <div
       v-on-clickaway="() => toggleDropdown(false)"

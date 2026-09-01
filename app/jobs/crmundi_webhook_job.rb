@@ -167,7 +167,10 @@ class CrmundiWebhookJob < ApplicationJob
 
     {
       phone: conversation.contact&.phone_number,
-      contact_id: contact_identifier(conversation),
+      # CRMundi espera o contact_id NATIVO do Chatwoot (inteiro, como string) para
+      # vincular o lead ao contato — nao o identifier/JID do WhatsApp (contact_identifier),
+      # que so serve para exibicao/telemetria.
+      contact_id: conversation.contact&.id&.to_s,
       conversation_id: conversation.id.to_s,
       contact_name: conversation.contact&.name,
       last_message: last_message_text,

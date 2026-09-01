@@ -45,6 +45,14 @@ if (isLibraryMode) {
 
 export default defineConfig({
   plugins: plugins,
+  server: {
+    // Em dev via Docker Compose, o Rails proxeia pro Vite usando o nome do
+    // serviço ("vite", resolvido pela rede interna do compose) em vez de
+    // "localhost" — sem isso, o Vite 5.4+ bloqueia a requisição com
+    // "Blocked request. This host is not allowed." (proteção contra DNS
+    // rebinding). Ver docs/local-docker-dev.md.
+    allowedHosts: ['vite'],
+  },
   css: {
     preprocessorOptions: {
       scss: {
